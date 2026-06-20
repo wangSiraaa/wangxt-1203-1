@@ -101,21 +101,22 @@ router.post('/:id/disconnect', (req, res) => {
   if (record.status !== 'connected') return res.status(400).json({ code: 1, message: '仅已接电记录可断电' })
 
   const meter = db.prepare('SELECT * FROM meters WHERE id = ?').get([record.meter_id])
-  if (disconnect_reading < meter.current_reading) {
-    return res.status(400).json({ code: 1, message: `断电读数(${disconnect_reading})不能小于电表当前读数(${meter.current_reading})` })
-  }
 
-  // 核心业务规则2：断电读数小于接电读数 - 标记为异常并创建异常处理记录，阻断结算
   let status = 'disconnected'
   let consumption = disconnect_reading - record.connect_reading
   let abnormalType = null
   let abnormalDesc = null
 
-  if (disconnect_reading < record.connect_reading) {
+  if (disconnect_reading < record.connect_reading || disconnect_reading < meter.current_reading) {
     status = 'abnormal'
     consumption = 0
-    abnormalType = 'reading_reverse'
-    abnormalDesc = `断电读数(${disconnect_reading})小于接电读数(${record.connect_reading})，需要人工处理后才能结算`
+    if (disconnect_reading < record.connect_reading) {
+      abnormalType = 'reading_reverse'
+      abnormalDesc = `断电读数(${disconnect_reading})小于接电读数(${record.connect_reading})，需要人工处理后才能结算`
+    } else {
+      abnormalType = 'reading_below_meter'
+      abnormalDesc = `断电读数(${disconnect_reading})小于电表当前读数(${meter.current_reading})，需要人工处理后才能结算`
+    }
     db.prepare(`INSERT INTO abnormal_readings (record_id, connect_reading, disconnect_reading, abnormal_type, description, status)
       VALUES (?, ?, ?, ?, ?, 'pending')`).run([record.id, record.connect_reading, disconnect_reading, abnormalType, abnormalDesc])
   }
@@ -125,12 +126,12 @@ router.post('/:id/disconnect', (req, res) => {
     WHERE id=?`).run([disconnect_reading, consumption, status, remark || null, record.id])
 
   db.prepare(`UPDATE power_interfaces SET status='available', updated_at=datetime('now','localtime') WHERE id=?`).run([record.interface_id])
-  db.prepare(`UPDATE meters SET current_reading=?, updated_at=datetime('now','localtime') WHERE id=?`).run([disconnect_reading, record.meter_id])
 
   if (status === 'abnormal') {
     db.prepare(`UPDATE applications SET status='abnormal', updated_at=datetime('now','localtime') WHERE id=?`).run([record.app_id])
-    res.json({ code: 0, message: '断电登记完成，但读数异常，已转入异常处理流程，暂不可结算', data: { status: 'abnormal', abnormal: true, power_consumption: 0 } })
+    res.json({ code: 0, message: '断电登记完成，但读数异常，已转入异常处理流程，请在异常处理中修正后再结算', data: { status: 'abnormal', abnormal: true, power_consumption: 0, abnormal_desc: abnormalDesc } })
   } else {
+    db.prepare(`UPDATE meters SET current_reading=?, updated_at=datetime('now','localtime') WHERE id=?`).run([disconnect_reading, record.meter_id])
     db.prepare(`UPDATE applications SET status='disconnected', updated_at=datetime('now','localtime') WHERE id=?`).run([record.app_id])
     res.json({ code: 0, data: { status: 'disconnected', abnormal: false, power_consumption: consumption }, message: '断电登记成功，可生成账单' })
   }

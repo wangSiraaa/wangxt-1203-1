@@ -63,6 +63,9 @@ router.post('/', (req, res) => {
     return res.status(400).json({ code: 1, message: '记录状态不正确，不能生成账单' })
   }
 
+  const pendingAbnormal = db.prepare('SELECT id, description FROM abnormal_readings WHERE record_id = ? AND status = ?').get([record_id, 'pending'])
+  if (pendingAbnormal) return res.status(400).json({ code: 1, message: `存在未处理的异常读数：${pendingAbnormal.description}，请先在异常处理中修正后再结算` })
+
   const existingBill = db.prepare('SELECT id FROM bills WHERE record_id = ? AND status != ?').get([record_id, 'void'])
   if (existingBill) return res.status(400).json({ code: 1, message: '该记录已生成有效账单' })
 
