@@ -14,6 +14,7 @@
         <router-link to="/records">接电登记</router-link>
         <router-link to="/bills">财务结算</router-link>
         <router-link to="/abnormal">异常处理</router-link>
+        <router-link to="/renewals">续费管理</router-link>
         <router-link to="/tariffs">费率设置</router-link>
       </div>
     </el-header>

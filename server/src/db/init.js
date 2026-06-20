@@ -125,7 +125,63 @@ CREATE TABLE IF NOT EXISTS abnormal_readings (
   created_at TEXT DEFAULT (datetime('now','localtime')),
   FOREIGN KEY (record_id) REFERENCES power_records(id)
 );
+
+CREATE TABLE IF NOT EXISTS renewal_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  renewal_no TEXT UNIQUE NOT NULL,
+  app_id INTEGER NOT NULL,
+  record_id INTEGER,
+  bill_id INTEGER,
+  original_berth_end_time TEXT,
+  extended_end_time TEXT NOT NULL,
+  extended_hours REAL NOT NULL,
+  extend_power REAL,
+  power_consumption REAL,
+  price_per_kwh REAL,
+  total_amount REAL NOT NULL,
+  is_locked INTEGER DEFAULT 0,
+  operator TEXT,
+  remark TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  updated_at TEXT DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (app_id) REFERENCES applications(id),
+  FOREIGN KEY (record_id) REFERENCES power_records(id),
+  FOREIGN KEY (bill_id) REFERENCES bills(id)
+);
+
+CREATE TABLE IF NOT EXISTS berth_extensions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  app_id INTEGER NOT NULL,
+  original_berth_time TEXT,
+  new_berth_time TEXT,
+  extension_reason TEXT,
+  operator TEXT,
+  status TEXT DEFAULT 'pending',
+  created_at TEXT DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (app_id) REFERENCES applications(id)
+);
 `)
+
+  function safeAlter(sql) {
+    try {
+      db.exec(sql)
+    } catch (e) {}
+  }
+
+  safeAlter('ALTER TABLE applications ADD COLUMN berth_end_time TEXT')
+  safeAlter('ALTER TABLE applications ADD COLUMN actual_berth_end_time TEXT')
+  safeAlter('ALTER TABLE applications ADD COLUMN is_extended INTEGER DEFAULT 0')
+  safeAlter('ALTER TABLE applications ADD COLUMN extension_count INTEGER DEFAULT 0')
+
+  safeAlter('ALTER TABLE power_records ADD COLUMN is_locked INTEGER DEFAULT 0')
+  safeAlter('ALTER TABLE power_records ADD COLUMN locked_at TEXT')
+  safeAlter('ALTER TABLE power_records ADD COLUMN locked_by TEXT')
+
+  safeAlter('ALTER TABLE power_interfaces ADD COLUMN locked_by_record_id INTEGER')
+
+  safeAlter('ALTER TABLE bills ADD COLUMN is_reading_locked INTEGER DEFAULT 0')
+  safeAlter('ALTER TABLE bills ADD COLUMN is_interface_locked INTEGER DEFAULT 0')
+  safeAlter('ALTER TABLE bills ADD COLUMN is_amount_locked INTEGER DEFAULT 0')
 
   const rateCount = db.prepare('SELECT COUNT(*) as cnt FROM tariff_rates').get().cnt
   if (rateCount === 0) {

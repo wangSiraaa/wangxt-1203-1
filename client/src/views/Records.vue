@@ -55,14 +55,33 @@
         </el-form-item>
         <el-form-item label="供电接口" prop="interface_id">
           <el-select v-model="connectForm.interface_id" placeholder="请选择接口" style="width:100%" @change="onInterfaceChange">
-            <el-option v-for="i in availableInterfaces" :key="i.id"
+            <el-option v-for="i in filteredInterfaces" :key="i.id"
               :label="`${i.interface_code} - ${i.interface_name} (${i.location}) 上限:${i.max_capacity}kW`"
-              :value="i.id">
+              :value="i.id"
+              :disabled="selectedApp && selectedApp.ship_capacity > i.max_capacity">
               <span style="float:left">{{ i.interface_code }} - {{ i.interface_name }}</span>
-              <span style="float:right; color:#8492a6; font-size:13px">{{ i.location }} | 上限:{{ i.max_capacity }}kW</span>
+              <span style="float:right; color:#8492a6; font-size:13px">
+                {{ i.location }} | 上限:{{ i.max_capacity }}kW
+                <el-tag v-if="selectedApp && selectedApp.ship_capacity > i.max_capacity" size="small" type="danger" style="margin-left:8px">容量不足</el-tag>
+                <el-tag v-else size="small" type="success" style="margin-left:8px">可用</el-tag>
+              </span>
             </el-option>
           </el-select>
         </el-form-item>
+
+        <div v-if="selectedApp && recommendedInterfaces.length > 0" style="padding:12px; background:#ecf5ff; border-radius:4px; margin-bottom:12px">
+          <div style="color:#409eff; font-weight:600; margin-bottom:6px">💡 推荐以下容量充足的接口：</div>
+          <div v-for="i in recommendedInterfaces" :key="i.id" style="font-size:13px; padding:4px 0">
+            <el-tag type="success" size="small" style="margin-right:8px">推荐</el-tag>
+            <strong>{{ i.interface_code }} - {{ i.interface_name }}</strong>
+            <span style="color:#606266; margin-left:8px">{{ i.location }} | 上限:{{ i.max_capacity }}kW</span>
+          </div>
+        </div>
+
+        <div v-if="capacityWarning" style="padding:12px; background:#fef0f0; border-radius:4px; margin-bottom:12px; color:#f56c6c">
+          <div style="font-weight:600; margin-bottom:6px">⚠️ {{ capacityWarning }}</div>
+          <div v-if="capacitySuggestion" style="font-size:13px">{{ capacitySuggestion }}</div>
+        </div>
         <el-form-item label="电表" prop="meter_id">
           <el-select v-model="connectForm.meter_id" placeholder="请选择电表" style="width:100%">
             <el-option v-for="m in availableMeters" :key="m.id"
@@ -120,9 +139,21 @@ const statusFilter = ref('')
 const selectedApp = ref(null)
 const selectedInterface = ref(null)
 const selectedMeter = ref(null)
+const capacityWarning = ref('')
+const capacitySuggestion = ref('')
 
 const recordStatusMap = { connected: '接电中', disconnected: '已断电', abnormal: '读数异常', billed: '已结算', cancelled: '已取消' }
 const recordStatusType = { connected: 'primary', disconnected: 'success', abnormal: 'danger', billed: 'info', cancelled: 'info' }
+
+const filteredInterfaces = computed(() => {
+  if (!selectedApp.value) return availableInterfaces.value
+  return availableInterfaces.value
+})
+
+const recommendedInterfaces = computed(() => {
+  if (!selectedApp.value) return []
+  return availableInterfaces.value.filter(i => i.max_capacity >= selectedApp.value.ship_capacity)
+})
 
 const connectVisible = ref(false)
 const disconnectVisible = ref(false)
@@ -185,14 +216,29 @@ const openConnectDialog = () => {
 
 const doConnect = async () => {
   await connectRef.value.validate()
-  if (selectedApp.value && selectedInterface.value && selectedApp.value.ship_capacity > selectedInterface.value.max_capacity) {
-    ElMessage.warning(`船舶容量(${selectedApp.value.ship_capacity}kW)超过接口上限(${selectedInterface.value.max_capacity}kW)，不能接电`)
-    return
+  capacityWarning.value = ''
+  capacitySuggestion.value = ''
+  try {
+    await api.records.connect(connectForm)
+    ElMessage.success('接电登记成功')
+    connectVisible.value = false
+    load()
+  } catch (e) {
+    if (e?.capacity_exceeded) {
+      capacityWarning.value = e.message
+      capacitySuggestion.value = e.suggestion
+      if (e.recommended_interfaces?.length > 0) {
+        const names = e.recommended_interfaces.map(i => `${i.interface_name}(${i.max_capacity}kW)`).join('、')
+        capacitySuggestion.value = `推荐以下容量充足的接口：${names}`
+      }
+    } else if (e?.interface_occupied) {
+      capacityWarning.value = e.message
+      capacitySuggestion.value = e.suggestion
+    } else if (e?.need_extension) {
+      capacityWarning.value = e.message
+      capacitySuggestion.value = '请先在【续费管理】中申请靠泊延期'
+    }
   }
-  await api.records.connect(connectForm)
-  ElMessage.success('接电登记成功')
-  connectVisible.value = false
-  load()
 }
 
 const openDisconnectDialog = (row) => {

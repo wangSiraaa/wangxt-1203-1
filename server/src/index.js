@@ -14,6 +14,7 @@ async function start() {
   const billsRouter = require('./routes/bills')
   const tariffsRouter = require('./routes/tariffs')
   const abnormalRouter = require('./routes/abnormal')
+  const renewalsRouter = require('./routes/renewals')
 
   const app = express()
   const PORT = process.env.PORT || 19503
@@ -33,6 +34,7 @@ async function start() {
   app.use('/api/bills', billsRouter)
   app.use('/api/tariffs', tariffsRouter)
   app.use('/api/abnormal', abnormalRouter)
+  app.use('/api/renewals', renewalsRouter)
 
   app.use((err, req, res, next) => {
     console.error(err.stack)

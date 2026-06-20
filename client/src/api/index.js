@@ -82,6 +82,15 @@ export const api = {
     create: (data) => request.post('/tariffs', data),
     update: (id, data) => request.put(`/tariffs/${id}`, data),
     remove: (id) => request.delete(`/tariffs/${id}`)
+  },
+  renewals: {
+    list: (params) => request.get('/renewals', { params }),
+    get: (id) => request.get(`/renewals/${id}`),
+    create: (data) => request.post('/renewals', data),
+    update: (id, data) => request.put(`/renewals/${id}`, data),
+    confirm: (id, data) => request.post(`/renewals/${id}/confirm`, data),
+    applyExtension: (data) => request.post('/renewals/apply-extension', data),
+    remove: (id) => request.delete(`/renewals/${id}`)
   }
 }
 

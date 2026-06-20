@@ -58,11 +58,72 @@ router.post('/connect', (req, res) => {
   const pi = db.prepare('SELECT * FROM power_interfaces WHERE id = ?').get([interface_id])
   if (!pi) return res.status(400).json({ code: 1, message: '接口不存在' })
 
-  // 核心业务规则1：船舶容量超过接口上限，阻断接电
-  if (ship.capacity > pi.max_capacity) {
+  // 业务规则1：校验靠泊时间 - 当前时间必须在靠泊时间之后
+  const now = dayjs()
+  const berthTime = dayjs(app.berth_time)
+  if (now.isBefore(berthTime)) {
     return res.status(400).json({
       code: 1,
-      message: `船舶容量(${ship.capacity}kW) 超过接口最大容量(${pi.max_capacity}kW)，禁止接电！`
+      message: `未到靠泊时间，当前时间(${now.format('YYYY-MM-DD HH:mm')})早于靠泊时间(${berthTime.format('YYYY-MM-DD HH:mm')})，请在靠泊后再接电`
+    })
+  }
+
+  // 业务规则2：校验靠泊结束时间（如果有）- 不能超过预计离港时间
+  if (app.berth_end_time) {
+    const berthEndTime = dayjs(app.berth_end_time)
+    if (now.isAfter(berthEndTime)) {
+      return res.status(400).json({
+        code: 1,
+        message: `已超过预计离港时间(${berthEndTime.format('YYYY-MM-DD HH:mm')})，请先申请靠泊延期后再接电`,
+        need_extension: true
+      })
+    }
+  }
+
+  // 业务规则3：船舶容量超过接口上限，阻断接电并推荐其他可用接口
+  if (ship.capacity > pi.max_capacity) {
+    const availableInterfaces = db.prepare(`
+      SELECT pi.*, m.id as meter_id, m.meter_code, m.meter_name, m.current_reading
+      FROM power_interfaces pi 
+      LEFT JOIN meters m ON m.interface_id = pi.id
+      WHERE pi.status = 'available' 
+        AND pi.max_capacity >= ?
+        AND pi.id != ?
+      ORDER BY pi.max_capacity ASC
+    `).all([ship.capacity, interface_id])
+
+    return res.status(400).json({
+      code: 1,
+      message: `船舶容量(${ship.capacity}kW) 超过接口最大容量(${pi.max_capacity}kW)，禁止接电！`,
+      capacity_exceeded: true,
+      ship_capacity: ship.capacity,
+      interface_capacity: pi.max_capacity,
+      recommended_interfaces: availableInterfaces,
+      suggestion: availableInterfaces.length > 0 
+        ? `推荐以下容量充足的接口：${availableInterfaces.map(i => `${i.interface_name}(${i.max_capacity}kW)`).join('、')}`
+        : '当前没有容量充足的可用接口，请稍后再试或联系调度中心'
+    })
+  }
+
+  // 业务规则4：校验接口是否被占用
+  if (pi.status !== 'available') {
+    const availableInterfaces = db.prepare(`
+      SELECT pi.*, m.id as meter_id, m.meter_code, m.meter_name, m.current_reading
+      FROM power_interfaces pi 
+      LEFT JOIN meters m ON m.interface_id = pi.id
+      WHERE pi.status = 'available' 
+        AND pi.max_capacity >= ?
+      ORDER BY pi.max_capacity ASC
+    `).all([ship.capacity])
+
+    return res.status(400).json({
+      code: 1,
+      message: `接口(${pi.interface_name})当前状态为${pi.status === 'occupied' ? '已占用' : pi.status}，无法接电`,
+      interface_occupied: true,
+      recommended_interfaces: availableInterfaces,
+      suggestion: availableInterfaces.length > 0 
+        ? `推荐以下可用接口：${availableInterfaces.map(i => `${i.interface_name}(${i.max_capacity}kW)`).join('、')}`
+        : '当前没有可用接口，请稍后再试或联系调度中心'
     })
   }
 

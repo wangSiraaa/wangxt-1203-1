@@ -91,11 +91,23 @@ router.post('/', (req, res) => {
 
 router.put('/:id', (req, res) => {
   const db = getDB()
-  // 核心业务规则3：账单确认后不能修改读数
   const bill = db.prepare('SELECT * FROM bills WHERE id = ?').get([req.params.id])
   if (!bill) return res.status(404).json({ code: 1, message: '账单不存在' })
-  if (bill.status === 'confirmed') return res.status(400).json({ code: 1, message: '账单已确认，禁止修改读数或金额！' })
   if (bill.status === 'void') return res.status(400).json({ code: 1, message: '账单已作废' })
+
+  const lockedFields = []
+  if (bill.is_reading_locked) lockedFields.push('读数')
+  if (bill.is_amount_locked) lockedFields.push('金额')
+  if (bill.is_interface_locked) lockedFields.push('接口')
+
+  if (bill.status === 'confirmed' || lockedFields.length > 0) {
+    return res.status(400).json({ 
+      code: 1, 
+      message: `账单已确认，${lockedFields.join('、')}已锁定，禁止修改！如需靠泊延期，请追加续费记录。`,
+      locked_fields: lockedFields,
+      can_renewal: true
+    })
+  }
 
   const { power_consumption, price_per_kwh, remark } = req.body
   const pc = power_consumption != null ? power_consumption : bill.power_consumption
@@ -105,10 +117,9 @@ router.put('/:id', (req, res) => {
   db.prepare(`UPDATE bills SET power_consumption=?, price_per_kwh=?, total_amount=?, remark=?, updated_at=datetime('now','localtime')
     WHERE id=?`).run([pc, ppk, total, remark != null ? remark : bill.remark, req.params.id])
 
-  // 同步更新接电记录的电量（若修改了耗电量）
   if (power_consumption != null) {
-    const record = db.prepare('SELECT status FROM power_records WHERE id = ?').get([bill.record_id])
-    if (record && record.status !== 'abnormal') {
+    const record = db.prepare('SELECT status, is_locked FROM power_records WHERE id = ?').get([bill.record_id])
+    if (record && record.status !== 'abnormal' && !record.is_locked) {
       db.prepare(`UPDATE power_records SET power_consumption=? WHERE id=?`).run([pc, bill.record_id])
     }
   }
@@ -123,10 +134,49 @@ router.post('/:id/confirm', (req, res) => {
   if (!bill) return res.status(404).json({ code: 1, message: '账单不存在' })
   if (bill.status !== 'draft') return res.status(400).json({ code: 1, message: '仅草稿状态账单可确认' })
 
-  db.prepare(`UPDATE bills SET status='confirmed', confirmed_by=?, confirmed_at=datetime('now','localtime'), updated_at=datetime('now','localtime')
-    WHERE id=?`).run([confirmed_by || '财务', req.params.id])
+  const tx = db.transaction(() => {
+    db.prepare(`UPDATE bills SET 
+      status='confirmed', 
+      confirmed_by=?, 
+      confirmed_at=datetime('now','localtime'), 
+      is_reading_locked=1,
+      is_interface_locked=1,
+      is_amount_locked=1,
+      updated_at=datetime('now','localtime')
+      WHERE id=?`).run([confirmed_by || '财务', req.params.id])
 
-  res.json({ code: 0, message: '账单已确认，读数和金额已锁定' })
+    db.prepare(`UPDATE power_records SET 
+      is_locked=1, 
+      locked_at=datetime('now','localtime'), 
+      locked_by=?,
+      updated_at=datetime('now','localtime')
+      WHERE id=?`).run([confirmed_by || '财务', bill.record_id])
+
+    const record = db.prepare('SELECT * FROM power_records WHERE id = ?').get([bill.record_id])
+    if (record) {
+      db.prepare(`UPDATE power_interfaces SET 
+        locked_by_record_id=?,
+        updated_at=datetime('now','localtime')
+        WHERE id=?`).run([bill.record_id, record.interface_id])
+    }
+
+    db.prepare(`UPDATE applications SET 
+      status='confirmed',
+      updated_at=datetime('now','localtime')
+      WHERE id=(SELECT app_id FROM power_records WHERE id=?)`).run([bill.record_id])
+  })
+
+  tx()
+
+  res.json({ 
+    code: 0, 
+    message: '账单已确认，读数、接口和费用已全部锁定。如需靠泊延期，只能追加续费记录。',
+    locked: {
+      reading: true,
+      interface: true,
+      amount: true
+    }
+  })
 })
 
 router.post('/:id/void', (req, res) => {

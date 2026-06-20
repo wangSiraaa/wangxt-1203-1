@@ -9,7 +9,8 @@ const routes = [
   { path: '/records', component: () => import('../views/Records.vue'), meta: { title: '接电登记' } },
   { path: '/bills', component: () => import('../views/Bills.vue'), meta: { title: '财务结算' } },
   { path: '/abnormal', component: () => import('../views/Abnormal.vue'), meta: { title: '异常处理' } },
-  { path: '/tariffs', component: () => import('../views/Tariffs.vue'), meta: { title: '费率设置' } }
+  { path: '/tariffs', component: () => import('../views/Tariffs.vue'), meta: { title: '费率设置' } },
+  { path: '/renewals', component: () => import('../views/Renewals.vue'), meta: { title: '续费管理' } }
 ]
 
 const router = createRouter({
