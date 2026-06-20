@@ -1,0 +1,17 @@
+{
+  "name": "shore-power-server",
+  "version": "1.0.0",
+  "description": "港区岸电接入计费系统 - 后端",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "init-db": "node src/db/init.js"
+  },
+  "dependencies": {
+    "sql.js": "^1.10.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "dayjs": "^1.11.11"
+  }
+}
